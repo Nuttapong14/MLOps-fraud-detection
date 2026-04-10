@@ -71,6 +71,7 @@ jobs:
         git add k8s/kserve/inference-service.yaml
         git diff --staged --quiet || \
           git commit -m "chore: update fraud-detector to ${SHORT_SHA} [skip ci]"
+        git pull --rebase origin main
         git push
 
     - name: Job summary
