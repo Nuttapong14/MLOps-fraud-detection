@@ -1,0 +1,28 @@
+prepare:
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  target_col: Class
+
+features:
+  amount_clip_upper: 10000.0
+  rolling_window_seconds: 3600 # 1 hour velocity window
+
+train:
+  model: xgboost
+  n_trials: 50 # Optuna trials (use 5 for CI)
+  cv_folds: 5
+  early_stopping_rounds: 50
+  optimize_metric: pr_auc # Better than roc_auc for imbalanced data
+
+thresholds:
+  min_roc_auc: 0.90 # Production gate
+  min_pr_auc: 0.70 # Production gate
+  ci_min_roc_auc: 0.85 # CI gate (relaxed)
+  drift_psi_threshold: 0.20 # Trigger retrain above this
+  canary_error_rate: 0.01 # Rollback canary if error > 1%
+
+serving:
+  fraud_threshold: 0.50 # P(fraud) > this → flag
+  model_name: fraud-detector
+  model_stage: Production

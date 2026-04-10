@@ -1,0 +1,12 @@
+project: fraud-detection
+registry: gs://YOUR_GCP_PROJECT_ID-mlops-data/feast/registry.pb
+provider: local
+
+offline_store:
+  type: file
+
+online_store:
+  type: redis
+  connection_string: "redis:6379"   # points to Redis on GKE; use localhost:6379 for local dev
+
+entity_key_serialization_version: 2

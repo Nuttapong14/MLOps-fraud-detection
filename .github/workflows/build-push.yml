@@ -1,0 +1,88 @@
+name: Build & Push Container
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - 'params.yaml'
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: asia-southeast1
+  AR_REPO: mlops
+  IMAGE_NAME: fraud-detector
+
+jobs:
+  build-push:
+    name: Build & Push to Artifact Registry
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # push image tag commit back to repo
+      id-token: write      # GCP Workload Identity
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Authenticate to GCP
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+    - name: Set image tag
+      id: tag
+      # Use env var for SHA to keep run: commands injection-safe
+      env:
+        GIT_SHA: ${{ github.sha }}
+      run: |
+        SHORT_SHA="${GIT_SHA:0:7}"
+        FULL_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${IMAGE_NAME}:${SHORT_SHA}"
+        echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+        echo "full_image=${FULL_IMAGE}" >> "$GITHUB_OUTPUT"
+
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile
+        push: true
+        tags: |
+          ${{ steps.tag.outputs.full_image }}
+          ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
+        cache-from: type=registry,ref=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}:latest
+        cache-to: type=inline
+        platforms: linux/amd64
+
+    - name: Update KServe manifest (GitOps — triggers ArgoCD sync)
+      env:
+        FULL_IMAGE: ${{ steps.tag.outputs.full_image }}
+        SHORT_SHA: ${{ steps.tag.outputs.short_sha }}
+      run: |
+        sed -i "s|image:.*fraud-detector:.*|image: ${FULL_IMAGE}|g" \
+          k8s/kserve/inference-service.yaml
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add k8s/kserve/inference-service.yaml
+        git diff --staged --quiet || \
+          git commit -m "chore: update fraud-detector to ${SHORT_SHA} [skip ci]"
+        git push
+
+    - name: Job summary
+      env:
+        FULL_IMAGE: ${{ steps.tag.outputs.full_image }}
+        SHORT_SHA: ${{ steps.tag.outputs.short_sha }}
+      run: |
+        {
+          echo "## Build Summary"
+          echo "| Item | Value |"
+          echo "|------|-------|"
+          echo "| Image | \`${FULL_IMAGE}\` |"
+          echo "| SHA | \`${SHORT_SHA}\` |"
+          echo "| ArgoCD | Auto-syncs within 3 min |"
+        } >> "$GITHUB_STEP_SUMMARY"

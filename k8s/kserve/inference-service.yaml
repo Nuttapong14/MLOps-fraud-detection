@@ -1,0 +1,42 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: fraud-detector
+  namespace: mlops
+  annotations:
+    serving.kserve.io/enable-prometheus-scraping: "true"
+spec:
+  predictor:
+    # Canary: new version gets 10% traffic initially
+    # Promote to 100% after monitoring confirms stability
+    canaryTrafficPercent: 10
+
+    # Active (canary) version — updated by build-push.yml CI
+    containers:
+    - name: kserve-container
+      image: asia-southeast1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/mlops/fraud-detector:latest
+      ports:
+      - containerPort: 8080
+        protocol: TCP
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: "http://mlflow.mlops.svc.cluster.local:5000"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "1"
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+        initialDelaySeconds: 10
+        periodSeconds: 5
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 30
+        periodSeconds: 10

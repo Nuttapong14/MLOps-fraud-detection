@@ -1,0 +1,49 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: .venv/bin/python src/features/prepare.py
+    deps:
+    - path: data/raw/creditcard.csv
+      hash: md5
+      md5: e90efcb83d69faf99fcab8b0255024de
+      size: 150828752
+    - path: src/features/prepare.py
+      hash: md5
+      md5: 37967811258dfe7afe92d88a95966346
+      size: 4991
+    params:
+      params.yaml:
+        features.amount_clip_upper: 10000.0
+        prepare.random_state: 42
+        prepare.target_col: Class
+        prepare.test_size: 0.2
+        prepare.val_size: 0.1
+    outs:
+    - path: data/processed/test.parquet
+      hash: md5
+      md5: e1530e8590f5a263d27e9ad9039b44d2
+      size: 13831483
+    - path: data/processed/train.parquet
+      hash: md5
+      md5: 60442db7efcf9120ed0db126f93ebc8e
+      size: 48399075
+    - path: data/processed/val.parquet
+      hash: md5
+      md5: 485f5475cc8819ae687f7fb74019982e
+      size: 6945498
+  validate:
+    cmd: .venv/bin/python src/features/validate.py
+    deps:
+    - path: data/processed/train.parquet
+      hash: md5
+      md5: 60442db7efcf9120ed0db126f93ebc8e
+      size: 48399075
+    - path: src/features/validate.py
+      hash: md5
+      md5: b814c549bc957b9c3ecc223e9c95cc13
+      size: 3473
+    outs:
+    - path: data/metrics/validation_report.json
+      hash: md5
+      md5: 2fc1a126b011234edfe0e072326c7f6b
+      size: 173

@@ -1,0 +1,67 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fraud-detector
+  namespace: argocd
+  labels:
+    app: fraud-detector
+    team: mlops
+  # Auto-delete child resources when this Application is deleted
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: mlops
+
+  source:
+    repoURL: https://github.com/your-org/mlops-fraud-gke
+    targetRevision: main
+    path: k8s              # sync everything under k8s/
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: mlops
+
+  syncPolicy:
+    automated:
+      prune: true          # delete resources removed from git
+      selfHeal: true       # revert manual kubectl changes
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+
+  # Health checks — ArgoCD waits for these before marking sync complete
+  ignoreDifferences:
+  - group: serving.kserve.io
+    kind: InferenceService
+    jsonPointers:
+    - /status                      # ignore runtime status field
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: mlops
+  namespace: argocd
+spec:
+  description: MLOps fraud detection platform
+  sourceRepos:
+  - https://github.com/your-org/mlops-fraud-gke
+  destinations:
+  - namespace: mlops
+    server: https://kubernetes.default.svc
+  - namespace: monitoring
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+  - group: serving.kserve.io
+    kind: InferenceService
+  - group: argoproj.io
+    kind: WorkflowTemplate
+  - group: argoproj.io
+    kind: EventSource
+  - group: argoproj.io
+    kind: Sensor

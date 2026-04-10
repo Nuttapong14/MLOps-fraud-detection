@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.mypy_cache/
+.ruff_cache/
+
+# Data files — DVC manages per-directory .gitignore for actual data files.
+# Do NOT ignore data/ directories here; DVC needs to place .dvc pointer files there.
+# DVC will auto-create data/raw/.gitignore to ignore creditcard.csv, etc.
+
+# ML artifacts
+mlruns/
+*.pkl
+*.joblib
+*.bento/
+
+# Local MLflow dev server
+mlflow.db
+mlflow.log
+mlflow_ci.db
+
+# DVC-managed data outputs (tracked via dvc.lock, not committed directly)
+data/processed/
+data/metrics/
+data/drift_reports/
+data/predictions.db
+
+# Secrets & local config
+.env
+*.json.key
+service-account*.json
+gcloud-key*.json
+
+# DVC local remote overrides (store real GCS URLs here, not in .dvc/config)
+.dvc/config.local
+
+# IDE
+.vscode/
+.idea/
+
+# Notebooks output
+notebooks/.ipynb_checkpoints/
+
+# OMC / Claude Code
+.omc/
+
+# OS
+.DS_Store

@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: drift-retrain-sensor
+  namespace: mlops
+spec:
+  template:
+    serviceAccountName: argo-events-sa
+  dependencies:
+  - name: drift-dep
+    eventSourceName: drift-alertmanager
+    eventName: drift-alert
+
+  triggers:
+  - template:
+      name: trigger-retrain-workflow
+      conditions: drift-dep
+      argoWorkflow:
+        operation: submit
+        source:
+          resource:
+            apiVersion: argoproj.io/v1alpha1
+            kind: Workflow
+            metadata:
+              generateName: fraud-retrain-
+              namespace: mlops
+              labels:
+                trigger: drift-alert
+                app: fraud-detector
+            spec:
+              workflowTemplateRef:
+                name: fraud-retrain-template
+        parameters:
+        - src:
+            dependencyName: drift-dep
+            dataKey: body.reason
+          dest: metadata.annotations.drift-reason

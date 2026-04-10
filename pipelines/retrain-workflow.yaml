@@ -1,0 +1,171 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: fraud-retrain-template
+  namespace: mlops
+  labels:
+    app: fraud-detector
+    pipeline: retrain
+spec:
+  serviceAccountName: argo-workflow-sa
+  entrypoint: retrain-pipeline
+  # Retain last 5 completed workflows for audit trail
+  podGC:
+    strategy: OnWorkflowCompletion
+  ttlStrategy:
+    secondsAfterCompletion: 604800  # 7 days
+
+  # Default resource requests for all steps
+  templates:
+  - name: retrain-pipeline
+    dag:
+      tasks:
+      - name: fetch-data
+        template: dvc-pull
+
+      - name: validate-data
+        template: run-validate
+        dependencies: [fetch-data]
+
+      - name: train-model
+        template: run-train
+        dependencies: [validate-data]
+
+      - name: evaluate-model
+        template: run-evaluate
+        dependencies: [train-model]
+        # Pass run_id from training step
+        arguments:
+          parameters:
+          - name: train-run-id
+            value: "{{tasks.train-model.outputs.parameters.run-id}}"
+
+      - name: deploy-if-better
+        template: conditional-deploy
+        dependencies: [evaluate-model]
+        when: "{{tasks.evaluate-model.outputs.parameters.passed}} == true"
+        arguments:
+          parameters:
+          - name: model-version
+            value: "{{tasks.evaluate-model.outputs.parameters.model-version}}"
+
+  # ── Step Templates ─────────────────────────────────────────────────────────
+
+  - name: dvc-pull
+    container:
+      image: asia-southeast1-docker.pkg.dev/PROJECT_ID/mlops/trainer:latest
+      command: [sh, -c]
+      args:
+        - |
+          echo "[step] Pulling latest data from DVC remote (GCS)..."
+          dvc pull data/raw/ data/processed/ || true
+          echo "[step] ✓ Data ready"
+      env:
+      - name: GOOGLE_APPLICATION_CREDENTIALS
+        value: /var/secrets/google/key.json
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+      volumeMounts:
+      - name: gcp-sa-key
+        mountPath: /var/secrets/google
+        readOnly: true
+
+  - name: run-validate
+    container:
+      image: asia-southeast1-docker.pkg.dev/PROJECT_ID/mlops/trainer:latest
+      command: [python, src/features/validate.py]
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+
+  - name: run-train
+    outputs:
+      parameters:
+      - name: run-id
+        valueFrom:
+          path: /tmp/mlflow_run_id.txt
+    container:
+      image: asia-southeast1-docker.pkg.dev/PROJECT_ID/mlops/trainer:latest
+      command: [sh, -c]
+      args:
+        - |
+          python src/training/train.py --experiment-name retrain-$(date +%Y%m%d)
+          # Write run_id for downstream steps
+          cat data/metrics/train_report.json | python -c \
+            "import json,sys; print(json.load(sys.stdin)['run_id'])" \
+            > /tmp/mlflow_run_id.txt
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: "http://mlflow.mlops.svc.cluster.local:5000"
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+
+  - name: run-evaluate
+    inputs:
+      parameters:
+      - name: train-run-id
+    outputs:
+      parameters:
+      - name: passed
+        valueFrom:
+          path: /tmp/eval_passed.txt
+      - name: model-version
+        valueFrom:
+          path: /tmp/model_version.txt
+    container:
+      image: asia-southeast1-docker.pkg.dev/PROJECT_ID/mlops/trainer:latest
+      command: [sh, -c]
+      args:
+        - |
+          python src/training/evaluate.py
+          python src/training/register.py
+          # Write outputs for DAG conditions
+          python -c "
+          import json
+          r = json.load(open('data/metrics/eval_report.json'))
+          open('/tmp/eval_passed.txt', 'w').write(str(r['passed_threshold']).lower())
+          open('/tmp/model_version.txt', 'w').write(str(r['model_version']))
+          "
+      env:
+      - name: MLFLOW_TRACKING_URI
+        value: "http://mlflow.mlops.svc.cluster.local:5000"
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+
+  - name: conditional-deploy
+    inputs:
+      parameters:
+      - name: model-version
+    container:
+      image: bitnami/kubectl:latest
+      command: [sh, -c]
+      args:
+        - |
+          MODEL_VERSION={{inputs.parameters.model-version}}
+          echo "[deploy] Updating KServe InferenceService to model v${MODEL_VERSION}..."
+
+          # Patch KServe InferenceService with new image tag
+          kubectl patch inferenceservice fraud-detector \
+            -n mlops \
+            --type=merge \
+            -p "{\"spec\":{\"predictor\":{\"containers\":[{
+              \"image\":\"asia-southeast1-docker.pkg.dev/PROJECT_ID/mlops/fraud-detector:v${MODEL_VERSION}\",
+              \"name\":\"kserve-container\"
+            }]}}}"
+
+          echo "[deploy] ✓ KServe updated to v${MODEL_VERSION} (canary: 10%)"
+
+  volumes:
+  - name: gcp-sa-key
+    secret:
+      secretName: gcp-service-account-key

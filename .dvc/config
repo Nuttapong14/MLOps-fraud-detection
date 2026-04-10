@@ -1,0 +1,7 @@
+[core]
+    remote = gcs
+['remote "gcs"']
+    url = gs://YOUR_GCP_PROJECT_ID-mlops-data/dvc-cache
+    version_aware = true
+# Override the URL locally (never committed) by running:
+#   dvc remote modify --local gcs url gs://YOUR_REAL_BUCKET/dvc-cache

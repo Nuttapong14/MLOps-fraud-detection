@@ -1,0 +1,132 @@
+name: ML Training CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/features/**'
+      - 'src/training/**'
+      - 'params.yaml'
+      - 'dvc.yaml'
+
+env:
+  PYTHON_VERSION: "3.11"
+  MLFLOW_TRACKING_URI: "sqlite:///mlflow_ci.db"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v4
+    - run: uv sync --all-extras
+    - run: uv run ruff check src/ tests/
+    - run: uv run ruff format --check src/ tests/
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v4
+    - run: uv sync --all-extras
+    - run: uv run pytest tests/unit/ -v --tb=short
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: unit-test-results
+        path: .pytest_cache/
+
+  train-and-validate:
+    name: Train & Validate
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests]
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: astral-sh/setup-uv@v4
+
+    - name: Restore venv cache
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+    - name: Install dependencies
+      run: uv sync --all-extras
+
+    - name: Authenticate to GCP
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+    - name: Pull processed data from DVC
+      run: uv run dvc pull data/processed/ --run-cache
+
+    - name: Validate data
+      run: uv run python src/features/validate.py
+
+    - name: Train model (CI mode — 5 trials)
+      # Use env var for PR number to avoid injection via ${{ }} in run:
+      env:
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        uv run python src/training/train.py \
+          --n-trials 5 \
+          --experiment-name "ci-pr-${PR_NUMBER}"
+
+    - name: Evaluate model
+      run: uv run python src/training/evaluate.py --min-roc-auc 0.85
+
+    - name: Read metrics into outputs
+      id: metrics
+      run: |
+        ROC=$(python3 -c "import json; r=json.load(open('data/metrics/eval_report.json')); print(f\"{r['test_roc_auc']:.4f}\")")
+        PR_AUC=$(python3 -c "import json; r=json.load(open('data/metrics/eval_report.json')); print(f\"{r['test_pr_auc']:.4f}\")")
+        F1=$(python3 -c "import json; r=json.load(open('data/metrics/eval_report.json')); print(f\"{r['test_f1']:.4f}\")")
+        echo "roc_auc=${ROC}" >> "$GITHUB_OUTPUT"
+        echo "pr_auc=${PR_AUC}" >> "$GITHUB_OUTPUT"
+        echo "f1=${F1}" >> "$GITHUB_OUTPUT"
+
+    - name: Comment PR with metrics
+      uses: actions/github-script@v7
+      # All values come from step outputs (trusted) — not from github.event directly
+      with:
+        script: |
+          const roc = '${{ steps.metrics.outputs.roc_auc }}';
+          const prAuc = '${{ steps.metrics.outputs.pr_auc }}';
+          const f1 = '${{ steps.metrics.outputs.f1 }}';
+          const passed = parseFloat(roc) >= 0.85;
+          const icon = passed ? '✅' : '❌';
+
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: [
+              `## ${icon} ML Model Metrics (CI — 5 Optuna trials)`,
+              '',
+              '| Metric | Value | Threshold |',
+              '|--------|-------|-----------|',
+              `| ROC-AUC | \`${roc}\` | ≥ 0.85 |`,
+              `| PR-AUC | \`${prAuc}\` | — |`,
+              `| F1 | \`${f1}\` | — |`,
+              '',
+              passed
+                ? '**Model passed CI gate.** Full training (50 trials) runs post-merge.'
+                : '**Model failed CI gate.** Review changes to `params.yaml` or features.',
+            ].join('\n')
+          });
+
+    - name: Upload metrics artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ci-metrics
+        path: data/metrics/

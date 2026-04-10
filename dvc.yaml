@@ -1,0 +1,57 @@
+stages:
+  prepare:
+    cmd: .venv/bin/python src/features/prepare.py
+    deps:
+      - src/features/prepare.py
+      - data/raw/creditcard.csv
+    params:
+      - prepare.test_size
+      - prepare.val_size
+      - prepare.random_state
+      - prepare.target_col
+      - features.amount_clip_upper
+    outs:
+      - data/processed/train.parquet
+      - data/processed/val.parquet
+      - data/processed/test.parquet
+
+  validate:
+    cmd: .venv/bin/python src/features/validate.py
+    deps:
+      - src/features/validate.py
+      - data/processed/train.parquet
+    metrics:
+      - data/metrics/validation_report.json:
+          cache: false
+
+  featurize:
+    cmd: .venv/bin/python src/features/feast_materialize.py
+    deps:
+      - src/features/feast_materialize.py
+      - src/features/feature_repo/features.py
+      - data/processed/train.parquet
+    outs:
+      - data/processed/feature_store/
+
+  train:
+    cmd: .venv/bin/python src/training/train.py
+    deps:
+      - src/training/train.py
+      - data/processed/train.parquet
+      - data/processed/val.parquet
+    params:
+      - train
+      - thresholds.min_roc_auc
+      - thresholds.min_pr_auc
+    metrics:
+      - data/metrics/train_report.json:
+          cache: false
+
+  evaluate:
+    cmd: .venv/bin/python src/training/evaluate.py
+    deps:
+      - src/training/evaluate.py
+      - data/processed/test.parquet
+    metrics:
+      - data/metrics/eval_report.json:
+          cache: false
