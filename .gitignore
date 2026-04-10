@@ -49,3 +49,6 @@ notebooks/.ipynb_checkpoints/
 
 # OS
 .DS_Store
+
+# docs to setting gcp
+docs/

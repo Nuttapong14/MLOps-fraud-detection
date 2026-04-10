@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write      # push image tag commit back to repo
-      id-token: write      # GCP Workload Identity
+      id-token: write      # required for Workload Identity Federation
 
     steps:
     - uses: actions/checkout@v4
