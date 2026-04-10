@@ -13,7 +13,7 @@ spec:
   project: mlops
 
   source:
-    repoURL: https://github.com/your-org/mlops-fraud-gke
+    repoURL: https://github.com/Nuttapong14/MLOps-fraud-detection
     targetRevision: main
     path: k8s              # sync everything under k8s/
 
@@ -50,7 +50,7 @@ metadata:
 spec:
   description: MLOps fraud detection platform
   sourceRepos:
-  - https://github.com/your-org/mlops-fraud-gke
+  - https://github.com/Nuttapong14/MLOps-fraud-detection
   destinations:
   - namespace: mlops
     server: https://kubernetes.default.svc
