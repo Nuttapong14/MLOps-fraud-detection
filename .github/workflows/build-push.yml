@@ -64,14 +64,14 @@ jobs:
         FULL_IMAGE: ${{ steps.tag.outputs.full_image }}
         SHORT_SHA: ${{ steps.tag.outputs.short_sha }}
       run: |
-        sed -i "s|image:.*fraud-detector:.*|image: ${FULL_IMAGE}|g" \
-          k8s/kserve/inference-service.yaml
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+        git pull --rebase origin main
+        sed -i "s|image:.*fraud-detector:.*|image: ${FULL_IMAGE}|g" \
+          k8s/kserve/inference-service.yaml
         git add k8s/kserve/inference-service.yaml
         git diff --staged --quiet || \
           git commit -m "chore: update fraud-detector to ${SHORT_SHA} [skip ci]"
-        git pull --rebase origin main
         git push
 
     - name: Job summary
