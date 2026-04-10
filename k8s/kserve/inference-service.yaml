@@ -14,7 +14,7 @@ spec:
     # Active (canary) version — updated by build-push.yml CI
     containers:
     - name: kserve-container
-      image: asia-southeast1-docker.pkg.dev/YOUR_GCP_PROJECT_ID/mlops/fraud-detector:latest
+      image: asia-southeast1-docker.pkg.dev/project-f0f63903-aaa6-4e1d-865/mlops/fraud-detector:62c3c40
       ports:
       - containerPort: 8080
         protocol: TCP
