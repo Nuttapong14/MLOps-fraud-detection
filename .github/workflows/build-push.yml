@@ -15,6 +15,10 @@ env:
   AR_REPO: mlops
   IMAGE_NAME: fraud-detector
 
+concurrency:
+  group: gitops-main          # only one gitops commit runs at a time
+  cancel-in-progress: false   # queue, don't cancel — every image must be recorded
+
 jobs:
   build-push:
     name: Build & Push to Artifact Registry
